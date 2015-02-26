@@ -1,5 +1,26 @@
 {
 	"ImportPath": "github.com/f03lipe/airplane",
 	"GoVersion": "go1.2.1",
-	"Deps": []
+	"Packages": [
+		"worker/main.go"
+	],
+	"Deps": [
+		{
+			"ImportPath": "github.com/AdRoll/goamz/aws",
+			"Rev": "63fc3ee4e8a0e82afe1779b47961278da07ea6dc"
+		},
+		{
+			"ImportPath": "github.com/AdRoll/goamz/s3",
+			"Rev": "63fc3ee4e8a0e82afe1779b47961278da07ea6dc"
+		},
+		{
+			"ImportPath": "github.com/AdRoll/goamz/sqs",
+			"Rev": "63fc3ee4e8a0e82afe1779b47961278da07ea6dc"
+		},
+		{
+			"ImportPath": "github.com/joho/godotenv",
+			"Comment": "v1-2-gead2e75",
+			"Rev": "ead2e75027bf1a3f6457e28d9eb3c2fa05109d2b"
+		}
+	]
 }
