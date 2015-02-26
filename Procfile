@@ -1,1 +1,2 @@
 web: airplane
+worker: worker
