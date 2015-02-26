@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
+	"os"
 )
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -19,5 +19,8 @@ func main() {
 	port := 8080
 	fmt.Printf("Server listening on port %s\n", strconv.Itoa(port))
 	http.HandleFunc("/", handler)
-	log.Fatal(http.ListenAndServe(":"+strconv.Itoa(port), nil))
+	err := http.ListenAndServe(":"+os.Getenv("PORT"), nil)
+	if err != nil {
+		panic(err)
+	}
 }
