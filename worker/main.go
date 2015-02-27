@@ -93,28 +93,33 @@ type SlicingJob struct {
 	//	Filetype   string `json: "filetype"`
 }
 
-func slice(tmp string, job *SlicingJob) {
+func slice(tmpPath string, job *SlicingJob) (string, error) {
+	// Process job to find slic3r path
+	slicerPath, exists := map[string]string{
+		"slic3r": "bin/Slic3r/bin/slic3r",
+	}[job.SlicerName]
+	if exists == false {
+		log.Fatal("Slicer for SlicerName " + job.SlicerName + " not found.")
+	}
 
-	slicerPath := "bin/Slic3r/bin/slic3r"
-
-	dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
+	// Get paths and generate command
+	basedir, err := filepath.Abs(filepath.Dir(os.Args[0]))
 	if err != nil {
 		log.Fatal(err)
 	}
-	absSlicerPath := filepath.Join(dir, slicerPath)
-
-	cmdArgs := filepath.Join(dir, modelPath)
-	cmdArgs = modelPath
-	fmt.Println(absSlicerPath, cmdArgs)
-
-	c := exec.Command(absSlicerPath, cmdArgs)
+	absSlicerPath := filepath.Join(basedir, slicerPath)
+	outputFilename := "output-" + strconv.Itoa(job.Id) + ".gcode"
+	c := exec.Command(absSlicerPath, tmpPath, "-o", outputFilename)
+	fmt.Printf("Executing ", c.Args, "\n")
 	c.Stdout = os.Stdout
 
+	// Run!
 	if err := c.Run(); err != nil {
 		fmt.Printf("%T\n", err)
 		log.Fatalf("ERR!", err)
 	}
 
+	return outputFilename, nil
 }
 
 // Loads slicing job from SQS, fetches stl file, slices it, saves gcode to S3,
@@ -153,11 +158,10 @@ func loadAndProcess(bucket *s3.Bucket, queueIn *sqs.Queue, queueOut *sqs.Queue) 
 	}
 	fmt.Printf("Parsed job: %+v\n", job)
 
+	// Get file from S3
 	if len(job.Filename) == 0 {
 		log.Fatal("Required attribute Filename not found in job")
 	}
-
-	// Get file from S3
 	filename := strconv.Itoa(job.Id) + "-" + job.Filename
 	path := filepath.Join(s3_folder, filename)
 	bytes, err := bucket.Get(path)
@@ -171,9 +175,21 @@ func loadAndProcess(bucket *s3.Bucket, queueIn *sqs.Queue, queueOut *sqs.Queue) 
 		log.Fatal("Failed to save to "+tmpPath, err)
 	}
 
-	slice(tmpPath, job)
+	outFilename, _ := slice(tmpPath, job)
+
+	// Open generated gcode
+	// Save gcode to de cloud
+	generated, err := ioutil.ReadFile(filepath.Join("/tmp", outFilename))
+	if err != nil {
+		log.Fatal("Failed to read generated gcode on path /tmp/"+outFilename, err)
+	}
+	outs3fn := strconv.Itoa(job.Id) + ".gcode"
+	options := s3.Options{}
+	if err := bucket.Put(outs3fn, generated, "", "", options); err != nil {
+		log.Fatal(err)
+	}
 	// loadFileFromS3("file")
-	//	slice("bin/Slic3r/bin/slic3r", "model.stl")
+
 }
 
 func main() {
@@ -217,7 +233,7 @@ func main() {
 
 	job := &SlicingJob{
 		Id:         123,
-		SlicerName: "slicer",
+		SlicerName: "slic3r",
 		Filename:   "me.stl",
 	}
 	messageJson, err := json.Marshal(job)
