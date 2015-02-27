@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"os"
+	"encoding/json"
 )
 
 import (
@@ -108,17 +109,16 @@ func slice (slicerPath string, modelPath string) {
 
 // Loads slicing job from SQS, fetches stl file, slices it, saves gcode to S3,
 // puts info back on queue
-func loadAndProcess(queue * sqs.Queue, bucket * s3.Bucket) {
+func loadAndProcess(bucket * s3.Bucket, queueIn * sqs.Queue, queueOut * sqs.Queue) {
 
-	log.Printf("loadAndProcess called with queue %s and bucket %s",
-		queue.Name, bucket.Name)
+	log.Printf("loadAndProcess called with s3 bucket %s, queue in %s and out %s",
+		bucket.Name, queueIn.Name, queueOut.Name)
 
 	params := map[string]string {
-		"yes": "yes",
 		"MaxNumberOfMessages": "1",
 		"VisibilityTimeout": "100",
 	}
-	resp, err := queue.ReceiveMessageWithParameters(params)
+	resp, err := queueIn.ReceiveMessageWithParameters(params)
 	if err != nil { log.Fatal(err) }
 
 	log.Printf("Num of messages received: %d", len(resp.Messages))
@@ -128,11 +128,12 @@ func loadAndProcess(queue * sqs.Queue, bucket * s3.Bucket) {
 	} else {
 		log.Printf("Message found on slicer queue:", resp.Messages[0])
 		// Pull from queue so others don't see it
-		_, err = queue.DeleteMessage(&resp.Messages[0])
+		_, err = queueIn.DeleteMessage(&resp.Messages[0])
 		if err != nil { log.Fatal(err) }
 	}
 
 	
+		
 
 // loadFileFromS3("file")
 //	slice("bin/Slic3r/bin/slic3r", "model.stl")
@@ -152,18 +153,27 @@ func main() {
 	if len(bucketName) == 0 {
 		log.Fatal("S3_BUCKET env variable required but not found")
 	}
-	queueName := os.Getenv("SQS_QUEUE")
-	if len(queueName) == 0 {
-		log.Fatal("SQS_QUEUE env variable required but not found")
+	queueNameIn := os.Getenv("SQS_QUEUE_IN")
+	if len(queueNameIn) == 0 {
+		log.Fatal("SQS_QUEUE_IN env variable required but not found")
+	}
+	queueNameOut := os.Getenv("SQS_QUEUE_OUT")
+	if len(queueNameOut) == 0 {
+		log.Fatal("SQS_QUEUE_OUT env variable required but not found")
 	}
 	
 	// Get s3 bucket
-
 	bucket := s3.New(auth, region).Bucket(bucketName)
 
-	// Get sqs queue
-	queue, err := sqs.New(auth, region).GetQueue(queueName)
+	// Get sqs queues
+	sqsClient := sqs.New(auth, region)
+	queueIn, err := sqsClient.GetQueue(queueNameIn)
+	if err != nil { log.Fatal(err) }
+	queueOut, err := sqsClient.GetQueue(queueNameOut)
 	if err != nil { log.Fatal(err) }
 	
-	loadAndProcess(queue, bucket)
+	messageJson, _ := json.Marshal(map[string]string{ "oi": "tchau" })
+	queueIn.SendMessage(string(messageJson))
+	
+	loadAndProcess(bucket, queueIn, queueOut)
 }
