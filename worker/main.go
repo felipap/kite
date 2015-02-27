@@ -91,9 +91,10 @@ type SlicingJob struct {
 	SlicerName string `json: "slicerName"`
 	Filename   string `json: "filename"`
 	//	Filetype   string `json: "filetype"`
+	Status string `json: "status"`
 }
 
-func slice(tmpPath string, job *SlicingJob) (string, error) {
+func slice(job *SlicingJob, inFilename, tempDir string) (string, error) {
 	// Process job to find slic3r path
 	slicerPath, exists := map[string]string{
 		"slic3r": "bin/Slic3r/bin/slic3r",
@@ -108,8 +109,9 @@ func slice(tmpPath string, job *SlicingJob) (string, error) {
 		log.Fatal(err)
 	}
 	absSlicerPath := filepath.Join(basedir, slicerPath)
-	outputFilename := "output-" + strconv.Itoa(job.Id) + ".gcode"
-	c := exec.Command(absSlicerPath, tmpPath, "-o", outputFilename)
+	aipath := filepath.Join(tempDir, inFilename)
+	aopath := filepath.Join(tempDir, "output-"+strconv.Itoa(job.Id)+".gcode")
+	c := exec.Command(absSlicerPath, aipath, "-o", aopath)
 	fmt.Printf("Executing ", c.Args, "\n")
 	c.Stdout = os.Stdout
 
@@ -119,7 +121,7 @@ func slice(tmpPath string, job *SlicingJob) (string, error) {
 		log.Fatalf("ERR!", err)
 	}
 
-	return outputFilename, nil
+	return aopath, nil
 }
 
 // Loads slicing job from SQS, fetches stl file, slices it, saves gcode to S3,
@@ -175,20 +177,35 @@ func loadAndProcess(bucket *s3.Bucket, queueIn *sqs.Queue, queueOut *sqs.Queue) 
 		log.Fatal("Failed to save to "+tmpPath, err)
 	}
 
-	outFilename, _ := slice(tmpPath, job)
+	aopath, _ := slice(job, filename, "/tmp")
 
 	// Open generated gcode
 	// Save gcode to de cloud
-	generated, err := ioutil.ReadFile(filepath.Join("/tmp", outFilename))
+	generated, err := ioutil.ReadFile(aopath)
 	if err != nil {
-		log.Fatal("Failed to read generated gcode on path /tmp/"+outFilename, err)
+		log.Fatal("Failed to read generated gcode on path "+aopath, err)
+	} else {
+		log.Printf("Generated gcode file was read at %s", aopath)
 	}
-	outs3fn := strconv.Itoa(job.Id) + ".gcode"
+	outs3fn := "gcode/" + strconv.Itoa(job.Id) + ".gcode"
 	options := s3.Options{}
 	if err := bucket.Put(outs3fn, generated, "", "", options); err != nil {
-		log.Fatal(err)
+		log.Fatal("Failed to put sliced model in s3 bucket", err)
+	} else {
+		log.Printf("Gcode file %s added to s3 bucket at %s\n", aopath, outs3fn)
 	}
-	// loadFileFromS3("file")
+
+	// Create message saying gcode was sliced
+	job.Status = "done"
+	b, err := json.Marshal(job)
+	if err != nil {
+		log.Fatalf("Failed to convert job %+v to json", job, err)
+	}
+	if resp, err := queueOut.SendMessage(string(b)); err != nil {
+		log.Fatal("Failed to send message to queueOut", err)
+	} else {
+		log.Printf("Job added to processed queue", resp)
+	}
 
 }
 
@@ -235,6 +252,7 @@ func main() {
 		Id:         123,
 		SlicerName: "slic3r",
 		Filename:   "me.stl",
+		Status:     "pending",
 	}
 	messageJson, err := json.Marshal(job)
 	if err != nil {
